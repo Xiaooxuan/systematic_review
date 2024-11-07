@@ -1,0 +1,1749 @@
+---
+title: "Systematic Review"
+output: html_document
+date: "2024-06-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(dplyr,tidyr,ggplot2,hrbrthemes,ggpubr,readxl,networkD3,fitdistrplus,MASS,broomg)
+install.packages("loo")
+library(loo)
+install.packages("brms")
+library(brms)
+# 安装 gridExtra 包
+install.packages("gridExtra")
+
+# 加载 gridExtra 包
+library(gridExtra)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r Read in data and clean}
+```
+
+
+```{r Read in data and clean}
+contact_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "contact experiments")
+contact_exp
+
+other_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "other kinds of experiments")
+other_exp
+
+all_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "all")
+all_exp
+```
+
+## Section 3.1 Orgnism/Contaminant types
+
+
+```{r give an id to each paper(all experiments), echo=FALSE}
+all_exp <- all_exp %>%
+  group_by(Title) %>%
+  mutate(id = cur_group_id()) %>%
+  ungroup()
+#all_exp <- all_exp %>%
+ #select(id, Title, everything())
+#all_exp
+
+all_exp <- all_exp %>%
+  dplyr::group_by(Title) %>%
+  dplyr::mutate(id = dplyr::cur_group_id()) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(id, Title, dplyr::everything())
+all_exp
+
+contact_exp <- contact_exp %>%
+  dplyr::group_by(Title) %>%
+  dplyr::mutate(id = dplyr::cur_group_id()) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(id, Title, dplyr::everything())
+contact_exp
+
+
+```
+
+```{r}
+library(networkD3)
+library(dplyr)
+organism_data <- all_exp%>%
+  distinct(Organism_type, Organism, id) %>%
+  count(Organism_type, Organism, name = "frequency")
+
+nodes <- data.frame(name = c(unique(organism_data$Organism_type), unique(organism_data$Organism)))
+
+# 创建链接数据框
+links <- organism_data %>%
+  mutate(source = match(Organism_type, nodes$name) - 1,
+         target = match(Organism, nodes$name) - 1,
+         value = frequency) %>%
+  select(source, target, value)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+```
+
+```{r plot Organism/Contaminant types}
+library(networkD3)
+library(dplyr)
+
+organism_data <- all_exp %>%
+  distinct(Organism_type, Organism, id) %>%
+  count(Organism_type, Organism, name = "frequency")
+
+nodes <- data.frame(name = c(unique(organism_data$Organism_type), unique(organism_data$Organism)))
+
+# 创建链接数据框
+links <- organism_data %>%
+  mutate(source = match(Organism_type, nodes$name) - 1,
+         target = match(Organism, nodes$name) - 1,
+         value = frequency) %>%
+  dplyr::select(source, target, value)  # 明确使用 dplyr::select()
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+```{r}
+library(dplyr)
+library(networkD3)
+
+# 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Suspending, Organism_type, id) %>%
+  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
+
+# 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
+nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
+nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
+nodes_organism <- data.frame(name = unique(suspending_data$Organism_type), type = "organism")
+
+# 合并节点数据框
+nodes <- bind_rows(nodes_medium, nodes_suspending, nodes_organism)
+
+# 创建第一阶段链接（Suspending_medium -> Suspending）
+links_1 <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
+         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建第二阶段链接（Suspending -> Organism_type）
+links_2 <- suspending_data %>%
+  mutate(source = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         target = match(Organism_type, nodes$name[nodes$type == "organism"]) - 1 + nrow(nodes_medium) + nrow(nodes_suspending),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 合并两个链接数据框
+links <- bind_rows(links_1, links_2)
+
+# 创建颜色比例尺，为不同的类型分配不同的颜色
+colorScale <- 'd3.scaleOrdinal()
+                 .domain(["medium", "suspending", "organism"])
+                 .range(["#1f77b4", "#ff7f0e", "#2ca02c"])'
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30,
+                        colourScale = colorScale, iterations = 0)
+
+# 显示桑基图
+sankey
+
+```
+
+```{r set up a color palette to make the color match}
+# 加载必要库
+# 加载必要的库
+library(RColorBrewer)
+
+# 使用 colorRampPalette 生成足够的颜色
+color_palette <- colorRampPalette(brewer.pal(12, "Set3"))(length(unique_organisms))
+
+# 创建一个颜色映射表
+color_mapping <- setNames(color_palette, unique_organisms)
+
+```
+
+```{r make color match}
+library(networkD3)
+
+# 使用 d3.js 的 colourScale 手动为节点分配颜色
+colorJS <- paste0("d3.scaleOrdinal().domain([",
+                  paste0("\"", unique_organisms, "\"", collapse = ","),
+                  "]).range([",
+                  paste0("\"", color_mapping, "\"", collapse = ","),
+                  "]);")
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30,
+                        colourScale = JS(colorJS))  # 使用自定义颜色映射
+
+# 显示桑基图
+sankey
+
+
+```
+
+# figure describe
+The figure presents a Sankey chart depicting the types of microorganisms or contaminants selected in the reviewed articles.  The left side of the chart enumerates the categories of substances studied, including biological fluids, Gram-negative bacteria, Gram-positive bacteria, phages, plant extracts, and viruses.  Each category is linked to specific organisms or contaminants on the right.  These specific names include artificial saliva, human saliva, various bacteria (such as Pseudomonas aeruginosa, Staphylococcus aureus, etc.), bacteriophage MS2, plant extract beetroot juice, and various viruses (such as SARS-CoV-2, human norovirus, etc.).  Among these, viruses constituted the largest proportion (53.1%) and bacteria (40.6%), with 10 Gram-negative bacteria and 8 Gram-positive bacteria.  Staphylococcus aureus was the most frequently mentioned organism (15.6%), followed by E. coli and norovirus (approximately 12.5% each).
+
+## Section 3.2 Publish year
+
+```{r publish year}
+yearly_organism_data <- all_exp %>%
+  distinct(Year, Organism_type, id) %>%
+  count(Year, Organism_type, name = "frequency")
+
+ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
+  geom_bar(stat = "identity") +
+  labs(#title = "Number of Articles Published Each Year by Organism Type",
+       x = "Year",
+       y = "Number of Articles",
+       fill = "Organism Type") +
+  theme_minimal()
+```
+
+```{r change the color to match previous plot}
+library(ggplot2)
+library(RColorBrewer)
+
+yearly_organism_data <- all_exp %>%
+  distinct(Year, Organism_type, id) %>%
+  count(Year, Organism_type, name = "frequency")
+
+# 获取颜色调色板
+color_palette <- brewer.pal(n = length(unique(yearly_organism_data$Organism_type)), "Set3")
+
+# 创建柱状图，使用相同的调色板
+ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = color_palette) +
+  labs(title = "Number of Articles Published Each Year by Organism Type",
+       x = "Year",
+       y = "Number of Articles",
+       fill = "Organism Type") +
+  theme_minimal()
+
+```
+
+```{r}
+# Step 1: Calculate the number of distinct articles per year
+yearly_article_data <- all_exp %>%
+  distinct(Year, Title) %>%  # Ensure each article (Title) is counted only once per Year
+  count(Year, name = "Number_of_Articles")  # Count the number of articles per year
+
+# Step 2: Plot the number of articles by year
+ggplot(data = yearly_article_data, aes(x = Year, y = Number_of_Articles)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # Simple bar plot with skyblue color
+  labs(title = "Number of Articles Published Each Year",
+       x = "Year",
+       y = "Number of Articles") +
+  theme_minimal()
+
+```
+```{r}
+# Step 1: Summarise each article by combining its organism types
+article_organism_summary <- all_exp %>%
+  group_by(Year, Title) %>%
+  summarise(Organism_types_combined = paste(unique(Organism_type), collapse = ", "), .groups = "drop")  # Combine organism types
+
+# Step 2: Split organism types for proportional coloring
+article_organism_proportion <- article_organism_summary %>%
+  mutate(Organism_type_split = strsplit(Organism_types_combined, ", ")) %>%  # Split organism types
+  unnest(Organism_type_split) %>%                                            # Unnest the split organism types
+  group_by(Year, Title) %>%
+  mutate(Proportion = 1/n()) %>%  # Assign equal proportion to each organism type in an article
+  rename(Organism_type = Organism_type_split)  # Rename for clarity
+
+# Step 3: Aggregate by year and organism type, summing up proportions
+yearly_organism_data <- article_organism_proportion %>%
+  group_by(Year, Organism_type) %>%
+  summarise(Proportional_Articles = sum(Proportion), .groups = "drop")  # Sum the proportional contributions
+
+# Step 4: Plot with proportional fill for multi-organism articles
+ggplot(data = yearly_organism_data, aes(x = Year, y = Proportional_Articles, fill = Organism_type)) +
+  geom_bar(stat = "identity", position = "stack") +  # Stack bars with proportional counts
+  labs(#title = "Proportional Articles Published Each Year by Organism Type",
+       x = "Year",
+       y = "Proportional Number of Articles",
+       fill = "Organism Type") +
+  #theme_minimal()
+# ggpubr::theme_pubr()
+ theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )
+```
+
+
+```{r another color palette}
+library(ggplot2)
+
+# 使用 color_mapping 中的颜色为 Organism_type 着色
+ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = color_mapping) +  # 使用相同的颜色映射
+  labs(title = "Number of Articles Published Each Year by Organism Type",
+       x = "Year",
+       y = "Number of Articles",
+       fill = "Organism Type") +
+  theme_minimal()
+
+```
+
+
+# figure describe
+This graph shows the number of articles published per year by type of organism. As can be seen from the chart, the focus of the study varied from year to year. For example, research in the early 1990s focused on viruses. Around 2000-2005, research directions began to diversify to include Gram-negative bacteria, Gram-positive bacteria, and viruses. By around 2013, the scope of the research was further expanded with the addition of mixtures and phages. Around 2021, the number of studies reached a peak, covering almost all types of organisms, especially viruses and Gram-negative bacteria.
+
+## Section 3.3 Suspending medium
+
+```{r bar chart Suspending_medium ~ Organism_type}
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Organism_type, id) %>%
+  count(Suspending_medium, Organism_type, name = "frequency")
+
+# 创建堆叠条形图
+ggplot(data = suspending_data, aes(x = Suspending_medium, y = frequency, fill = Organism_type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Frequency of Suspending Medium by Organism Type",
+       x = "Suspending Medium",
+       y = "Frequency",
+       fill = "Organism Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r frequency of suspension}
+ggplot(all_exp, aes(x = Suspending_medium)) +
+  geom_bar() +
+  xlab("Suspending Medium") +
+  ylab("Frequency") +
+  ggtitle("Frequency of Different Suspending Media")+
+   theme_minimal()
+
+```
+
+```{r sankey Suspending_medium ~ Orgnism_type}
+library(dplyr)
+library(networkD3)
+
+# 确保每个Suspending Medium和Orgnism_type中每个相同的id只记录一次，并统计频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Organism_type, id) %>%
+  count(Suspending_medium, Organism_type, name = "frequency")
+
+# 创建节点和链接数据框
+# 保证节点数据框中的名称唯一
+nodes <- data.frame(name = unique(c(suspending_data$Suspending_medium, suspending_data$Organism_type)))
+
+# 创建链接数据框
+links <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name) - 1,
+         target = match(Organism_type, nodes$name) - 1,
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
+
+```{r sankey Suspending_medium ~ Organism_type}
+library(dplyr)
+library(networkD3)
+
+# 确保每个Suspending Medium、Orgnism_type和Suspending中每个相同的id只记录一次，并统计频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Organism_type, Suspending, id) %>%
+  count(Suspending_medium, Organism_type, Suspending, name = "frequency")
+
+# 创建节点数据框，包含所有唯一的Suspending_medium、Orgnism_type和Suspending
+nodes <- data.frame(name = unique(c(suspending_data$Suspending_medium, 
+                                    suspending_data$Organism_type, 
+                                    suspending_data$Suspending)))
+
+# 创建第一阶段（Suspending_medium -> Orgnism_type）和第二阶段（Orgnism_type -> Suspending）的链接数据框
+links_1 <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name) - 1,
+         target = match(Suspending, nodes$name) - 1,
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
+
+```{r suspension type link to each spercific suspension medium}
+library(dplyr)
+library(networkD3)
+
+# 统计 Suspending_medium 和 Suspending 的频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Suspending, id) %>%
+  count(Suspending_medium, Suspending, name = "frequency")
+
+# 创建节点数据框，分别为 Suspending_medium 和 Suspending 创建不同的索引范围
+# 确保它们的名字可以保持不变
+nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
+nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
+nodes <- bind_rows(nodes_medium, nodes_suspending)
+
+# 创建第一阶段链接（Suspending_medium -> Suspending）
+# 分别根据不同的节点类型进行索引匹配
+links <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
+         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium), # target 索引偏移
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建桑基图（只保留第一阶段的链接）
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
+```{r removed those untarget lines and changed the color all the same}
+library(dplyr)
+library(networkD3)
+
+# 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Suspending, Organism_type, id) %>%
+  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
+
+# 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
+nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
+nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
+nodes_organism <- data.frame(name = unique(suspending_data$Organism_type), type = "organism")
+
+# 合并节点数据框
+nodes <- bind_rows(nodes_medium, nodes_suspending, nodes_organism)
+
+# 创建第一阶段链接（Suspending_medium -> Suspending）
+links_1 <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
+         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建第二阶段链接（Suspending -> Organism_type）
+links_2 <- suspending_data %>%
+  mutate(source = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         target = match(Organism_type, nodes$name[nodes$type == "organism"]) - 1 + nrow(nodes_medium) + nrow(nodes_suspending),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 合并两个链接数据框
+links <- bind_rows(links_1, links_2)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30,
+                        # 自定义节点的位置
+                        iterations = 0) 
+
+# 通过 JavaScript 自定义节点的位置和显示标签
+sankey$x$options$nodePadding <- 10  # 节点之间的间距
+sankey$x$nodes$group <- as.factor(nodes$type)  # 设置不同节点组的分配
+
+# 显示桑基图
+sankey
+
+```
+
+```{r change color back to original}
+library(dplyr)
+library(networkD3)
+
+# 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Suspending, Organism_type, id) %>%
+  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
+
+# 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
+nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
+nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
+nodes_organism <- data.frame(name = unique(suspending_data$Organism_type), type = "organism")
+nodes <- bind_rows(nodes_medium, nodes_suspending, nodes_organism)
+
+# 创建第一阶段链接（Suspending_medium -> Suspending）
+links_1 <- suspending_data %>%
+  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
+         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 创建第二阶段链接（Suspending -> Organism_type）
+links_2 <- suspending_data %>%
+  mutate(source = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
+         target = match(Organism_type, nodes$name[nodes$type == "organism"]) - 1 + nrow(nodes_medium) + nrow(nodes_suspending),
+         value = frequency) %>%
+  dplyr::select(source, target, value)
+
+# 合并两段链接
+links <- bind_rows(links_1, links_2)
+
+# 创建桑基图（包含两段链接）
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
+
+```{r Suspending_medium Scatter Plot}
+suspending_data <- all_exp %>%
+  distinct(Suspending_medium, Organism_type, id) %>%
+  count(Suspending_medium, Organism_type, name = "frequency")
+
+# 创建散点图
+ggplot(data = suspending_data, aes(x = Suspending_medium, y = frequency, color = Organism_type)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(title = "Frequency of Suspending Medium by Organism Type",
+       x = "Suspending Medium",
+       y = "Frequency",
+       color = "Organism Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Section 3.4 Environmental conditions
+```{r Environmental conditions Pie Chart}
+environmental_counts <- all_exp %>%
+  count(Environmental_conditions)
+ggplot(environmental_counts, aes(x = "", y = n, fill = Environmental_conditions)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  labs(title = "Proportion of Articles by Environmental Conditions",
+       fill = "Environmental Conditions") +
+  theme_void() +
+  theme(legend.position = "right")
+```
+
+```{r temperature and RH}
+filtered_data <- all_exp %>%
+  filter(Environmental_conditions %in% c("N", "Y", "Temperature only"))
+
+# 筛选出 Environmental_conditions 为 Y 的行
+y_data <- filtered_data %>%
+  filter(Environmental_conditions == "Y")
+
+# 使用 ggplot2 绘制图形
+ggplot(y_data, aes(x = Relative_humidity, y = Temperature, color= Organism_type)) +
+  geom_point() +
+  labs(title = "Temperature vs Relative Humidity",
+       x = "Relative Humidity",
+       y = "Temperature") +
+  theme_minimal()
+```
+```{r calculate Absolute_humidity}
+library(dplyr)
+
+# 定义计算绝对湿度的函数
+calculate_absolute_humidity <- function(temperature, relative_humidity) {
+  # 计算饱和水蒸气压
+  es <- 6.112 * exp((17.67 * temperature) / (temperature + 243.5))
+  
+  # 计算实际水蒸气压
+  e <- relative_humidity * es
+  
+  # 计算绝对湿度
+  ah <- (216.7 * e) / (temperature + 273.15)
+  
+  return(ah)
+}
+
+# 假设 all_exp 是你的数据框，包含 Relative_humidity 和 Temperature 列
+all_exp <- all_exp %>%
+  mutate(Absolute_humidity = calculate_absolute_humidity(Temperature, Relative_humidity / 100))
+
+# 查看结果
+print(all_exp)
+```
+```{r plot temperature and AH}
+filtered_data <- all_exp %>%
+  filter(Environmental_conditions %in% c("N", "Y", "Temperature only"))
+
+# 筛选出 Environmental_conditions 为 Y 的行
+y_data <- filtered_data %>%
+  filter(Environmental_conditions == "Y")
+
+# 使用 ggplot2 绘制图形
+ggplot(y_data, aes(x = Absolute_humidity, y = Temperature)) +
+  geom_point() +
+  labs(title = "Temperature vs Absolute Humidity",
+       x = "Absolute Humidity",
+       y = "Temperature") +
+  theme_minimal()
+```
+## Section 3.5 surface type for contact experiments
+```{r}
+contact_exp <- contact_exp %>%
+  group_by(Title) %>%
+  mutate(id = cur_group_id()) %>%
+  ungroup()
+
+unique_data <- contact_exp %>%
+  distinct(id, Donor_surface_type, Donor_surface, .keep_all = TRUE) %>%
+  select(id, Donor_surface_type, Donor_surface)
+
+nodes <- data.frame(name = c(unique(unique_data$Donor_surface_type), unique(unique_data$Donor_surface)))
+links <- unique_data %>%
+  mutate(source = match(Donor_surface_type, nodes$name) - 1,
+         target = match(Donor_surface, nodes$name) - 1 + length(unique(unique_data$Donor_surface_type)),
+         value = 1) %>%
+  select(source, target, value)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "source", Target = "target",
+                        Value = "value", NodeID = "name",
+                        units = "Frequency", fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+```
+
+```{r Frequency of Different Donor Surface Types}
+# 绘制柱状图展示不同表面类型的使用频率
+ggplot(contact_exp, aes(x = Donor_surface_type)) +
+  geom_bar() +
+  xlab("Donor Surface Type") +
+  ylab("Frequency") +
+  ggtitle("Frequency of Different Donor Surface Types") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+filtered_data <- contact_exp[contact_exp$Donor_surface_type != "hand", ]
+
+# 绘制柱状图展示不同表面类型的使用频率（去除了“hand”）
+ggplot(filtered_data, aes(x = Donor_surface_type)) +
+  geom_bar() +
+  xlab("Donor Surface Type") +
+  ylab("Frequency") +
+  ggtitle("Frequency of Different Donor Surface Types (excluding 'hand')") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+surface to hand: 16
+hand to surface: 14
+
+```{r Frequency of Different Receptor Surface Types}
+ggplot(contact_exp, aes(x = Recipient_surface_type)) +
+  geom_bar() +
+  xlab("Receptor Surface Type") +
+  ylab("Frequency") +
+  ggtitle("Frequency of Different Receptor Surface Types") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+filtered_data_r <- contact_exp[contact_exp$Recipient_surface_type != "hand", ]
+
+# 绘制柱状图展示不同表面类型的使用频率（去除了“hand”）
+ggplot(filtered_data_r, aes(x = Recipient_surface_type)) +
+  geom_bar() +
+  xlab("Receptor Surface Type") +
+  ylab("Frequency") +
+  ggtitle("Frequency of Different Receptor Surface Types (excluding 'hand')") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+
+nodes <- data.frame(name = unique(c(contact_exp$Donor_surface_type, contact_exp$Recipient_surface_type)))
+
+# 创建一个链接数据框
+links <- contact_exp %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n()) %>%
+  ungroup() %>%
+  mutate(Donor_surface_type_id = match(Donor_surface_type, nodes$name) - 1,
+         Recipient_surface_type_id = match(Recipient_surface_type, nodes$name) - 1)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
+                        Value = "value", NodeID = "name",
+                        fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+
+```
+
+## 3.6 transfer direction for contact experiments
+
+```{r transfer direction}
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type != 'NA' & Recipient_surface_type != 'NA')
+
+# 假设你的数据框名为 contact_exp
+# 创建一个节点数据框，为了区分 Donor 和 Recipient，我们在名字上加前缀
+nodes <- data.frame(name = c(paste0("Donor_", unique(filtered_data$Donor_surface_type)),
+                             paste0("Recipient_", unique(filtered_data$Recipient_surface_type))))
+
+# 创建一个链接数据框
+links <- filtered_data %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n()) %>%
+  ungroup() %>%
+  mutate(Donor_surface_type_id = match(paste0("Donor_", Donor_surface_type), nodes$name) - 1,
+         Recipient_surface_type_id = match(paste0("Recipient_", Recipient_surface_type), nodes$name) - 1)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
+                        Value = "value", NodeID = "name",
+                        fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
+```{r}
+library(dplyr)
+library(networkD3)
+library(tools)
+
+# 假设你的数据框名为 contact_exp
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type != 'NA' & Recipient_surface_type != 'NA')
+
+# 在 nodes 数据框中区分 Donor 和 Recipient 的名称，但保留原始名称用于显示
+nodes <- data.frame(name = unique(c(paste0("Donor: ", toTitleCase(filtered_data$Donor_surface_type)),
+                                    paste0("Recipient: ", toTitleCase(filtered_data$Recipient_surface_type)))))
+
+# 创建链接数据框并确保两列对应正确的节点
+links <- filtered_data %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n()) %>%
+  ungroup() %>%
+  mutate(Donor_surface_type = paste0("Donor: ", toTitleCase(Donor_surface_type)),
+         Recipient_surface_type = paste0("Recipient: ", toTitleCase(Recipient_surface_type)),
+         Donor_surface_type_id = match(Donor_surface_type, nodes$name) - 1,
+         Recipient_surface_type_id = match(Recipient_surface_type, nodes$name) - 1)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
+                        Value = "value", NodeID = "name",
+                        fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey #original
+
+require(tools)
+nodes <- data.frame(name = unique(tools::toTitleCase(filtered_data$Donor_surface_type),
+                                     tools::toTitleCase(filtered_data$Recipient_surface_type)))
+
+# 创建链接数据框并确保两列对应正确的节点
+links <- filtered_data %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n()) %>%
+  ungroup() %>%
+  mutate(Donor_surface_type = toTitleCase(Donor_surface_type),
+         Recipient_surface_type = toTitleCase(Recipient_surface_type),
+         Donor_surface_type_id = match(Donor_surface_type, nodes$name) - 1,
+         Recipient_surface_type_id = match(Recipient_surface_type, nodes$name) - 1)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
+                        Value = "value", NodeID = "name",
+                        fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+```
+
+surface to hand: 16
+hand to surface: 14
+hand to hand: 5
+
+```{r porosity}
+# 载入必要的库
+
+# 假设你的数据框名为 contact_exp
+# 过滤掉 Results (mean)% 为 '-' 的行
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 创建新的组合列
+filtered_data <- filtered_data %>%
+  mutate(Porosity_Combination = paste(Donor_porosity, Recipient_porosity, sep = "_"))
+
+# 绘制箱线图
+p <- ggplot(filtered_data, aes(x = Porosity_Combination, y = `Results (mean)%`, fill = Porosity_Combination)) +
+  geom_boxplot() +  # 绘制箱线图
+  scale_fill_brewer(palette = "Set3") +  # 使用调色板为不同组合着色
+  labs(x = "Porosity Combination (Donor_Recipient)", y = "Results (mean)%", fill = "Porosity Combination") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # x轴标签旋转
+
+# 显示图表
+print(p)
+
+```
+
+```{r print content of some columns}
+# 列出Donor_porosity为Y时的Donor_surface_type
+donor_y <- unique(contact_exp$Donor_surface_type[contact_exp$Donor_porosity == "Y"])
+print("Donor_surface_type when Donor_porosity is Y:")
+print(donor_y)
+
+# 列出Donor_porosity为N时的Donor_surface_type
+donor_n <- unique(contact_exp$Donor_surface_type[contact_exp$Donor_porosity == "N"])
+print("Donor_surface_type when Donor_porosity is N:")
+print(donor_n)
+
+# 列出Recipient_porosity为Y时的Recipient_surface_type
+recipient_y <- unique(contact_exp$Recipient_surface_type[contact_exp$Recipient_porosity == "Y"])
+print("Recipient_surface_type when Recipient_porosity is Y:")
+print(recipient_y)
+
+# 列出Recipient_porosity为N时的Recipient_surface_type
+recipient_n <- unique(contact_exp$Recipient_surface_type[contact_exp$Recipient_porosity == "N"])
+print("Recipient_surface_type when Recipient_porosity is N:")
+print(recipient_n)
+```
+
+```{r contact time distribution }
+ggplot(contact_exp, aes(x = time)) + 
+  geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Frequency of Time in Contact Experiments", 
+       x = "Time (seconds)", 
+       y = "Frequency") +
+  theme_minimal()
+
+# 绘制time列的频率分布图，按Donor_surface_type颜色区分
+ggplot(contact_exp, aes(x = time, fill = Donor_surface_type)) + 
+  geom_histogram(binwidth = 1, color = "black", alpha = 0.7, position = "stack") +
+  labs(title = "Frequency of Time in Contact Experiments by Donor Surface Type", 
+       x = "Time (seconds)", 
+       y = "Frequency", 
+       fill = "Donor Surface Type") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")  # 使用颜色调色板
+```
+
+
+```{r calculate Absolute_humidity for contact experiments}
+# 定义计算绝对湿度的函数
+calculate_absolute_humidity <- function(temperature, relative_humidity) {
+  # 计算饱和水蒸气压
+  es <- 6.112 * exp((17.67 * temperature) / (temperature + 243.5))
+  
+  # 计算实际水蒸气压
+  e <- relative_humidity * es
+  
+  # 计算绝对湿度
+  ah <- (216.7 * e) / (temperature + 273.15)
+  
+  return(ah)
+}
+
+# 假设 all_exp 是你的数据框，包含 Relative_humidity 和 Temperature 列
+contact_exp <- contact_exp %>%
+  mutate(Absolute_humidity = calculate_absolute_humidity(Temperature, Relative_humidity / 100))
+
+# 查看结果
+print(contact_exp)
+```
+
+```{r}
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type != 'hand' & `Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制折线图
+p <- ggplot(filtered_data, aes(x = Absolute_humidity, y = `Results (mean)%`, 
+                               color = Temperature, shape = Donor_surface_type)) +
+  geom_line(aes(group = Donor_surface_type)) +  # 根据 Donor_surface_type 分组绘制线条
+  geom_point() +  # 绘制点
+  scale_color_gradient(low = "blue", high = "red") +  # 颜色浓度表示温度，从蓝色（低温）到红色（高温）
+  labs(color = "Temperature", shape = "Donor Surface Type") +  # 图例标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "right")  # 图例放在右侧
+
+# 显示图表
+print(p)
+
+```
+```{r}
+
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type != 'hand' & `Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制折线图
+p <- ggplot(filtered_data, aes(x = Absolute_humidity, y = `Results (mean)%`, 
+                               color = Temperature, shape = Donor_surface_type)) +
+  geom_point() +  # 绘制点
+  geom_smooth(aes(group = Donor_surface_type), method = "loess", se = FALSE) +  # 添加平滑曲线
+  scale_color_gradient(low = "blue", high = "red") +  # 颜色浓度表示温度，从蓝色（低温）到红色（高温）
+  labs(color = "Temperature", shape = "Donor Surface Type") +  # 图例标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "right")  # 图例放在右侧
+
+# 显示图表
+print(p)
+
+```
+
+```{r Group bar chart of contaminate method }
+
+# 对干燥时间进行分组处理
+all_exp <- all_exp %>%
+  mutate(DryingTimeGroup = case_when(
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` >= 1 & `drying duration` <= 15 ~ "1-15 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 15 & `drying duration` <= 30 ~ "16-30 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 30 & `drying duration` <= 45 ~ "31-45 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 45 & `drying duration` <= 60 ~ "46-60 minutes",
+    TRUE ~ NA_character_  # 对于非干燥的表面或无干燥时间的数据
+  ))
+
+# 汇总数据：根据表面状态和干燥时间分组计算每组的数量
+summary_data <- all_exp %>%
+  group_by(`Pre-contact_Preparation (wet or dry)`, DryingTimeGroup) %>%
+  summarise(Count = n()) %>%
+  ungroup()
+
+# 绘制分组条形图
+ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = Count, fill = DryingTimeGroup)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(#title = "Surface Condition and Drying Time Distribution", 
+    x = "Surface Condition", y = "Frequency", fill = "Drying Time Group") +
+   theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )
+```
+```{r Group bar chart of contaminate method by id}
+
+
+# Categorize drying duration into groups
+all_exp <- all_exp %>%
+  mutate(DryingTimeGroup = case_when(
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` >= 1 & `drying duration` <= 15 ~ "1-15 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 15 & `drying duration` <= 30 ~ "16-30 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 30 & `drying duration` <= 45 ~ "31-45 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 45 & `drying duration` <= 60 ~ "46-60 minutes",
+    TRUE ~ NA_character_  # For non-dry surfaces or missing drying duration
+  ))
+
+# Summarize data: Group by surface condition and drying time group, then count unique IDs
+summary_data <- all_exp %>%
+  group_by(`Pre-contact_Preparation (wet or dry)`, DryingTimeGroup) %>%
+  summarise(UniqueID_Count = n_distinct(id)) %>%
+  ungroup()
+
+# Create grouped bar chart with y-axis as unique ID count
+ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueID_Count, fill = DryingTimeGroup)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(#title = "Surface Condition and Drying Time Distribution by Unique IDs", 
+       x = "Surface Condition", y = "Number of Articles", fill = "Drying Time Group") +
+  #theme_minimal()
+theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )
+
+```
+```{r}
+contact_exp_filtered_1 <- contact_exp %>%
+  filter(
+    !grepl("hand", Donor_surface_type, ignore.case = TRUE)& Donor_surface_type != "")
+    
+
+# 绘制 Donor_surface_type 和 Donor_porosity 的频率分布图
+donor_plot <- ggplot(contact_exp_filtered_1, aes(x = Donor_surface_type, fill = Donor_porosity)) +
+  geom_bar(color = "black", alpha = 0.7, position = "stack") +
+  labs(title = "Donor Surface Materials ", 
+       x = "Donor Surface Type", 
+       y = "Frequency", 
+       fill = "Donor Porosity") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+  
+
+contact_exp_filtered_2 <- contact_exp %>%
+  filter(
+    !grepl("hand", Recipient_surface_type, ignore.case = TRUE) & Recipient_surface_type != "")
+# 绘制 Recipient_surface_type 和 Recipient_porosity 的频率分布图
+recipient_plot <- ggplot(contact_exp_filtered_2, aes(x = Recipient_surface_type, fill = Recipient_porosity)) +
+  geom_bar(color = "black", alpha = 0.7, position = "stack") +
+  labs(title = "Recipient Surface Materials ", 
+       x = "Recipient Surface Type", 
+       y = "Frequency", 
+       fill = "Recipient Porosity") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+  
+
+# 使用 grid.arrange 将两个图排列在一起，左边为Donor，右边为Recipient
+grid.arrange(donor_plot, recipient_plot, ncol = 2)
+
+```
+
+
+
+```{r donor surface TE&environmental conditions}
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type %in% c('Metal', 'Plastic', 'Glass') & `Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制折线图
+p <- ggplot(filtered_data, aes(x = Absolute_humidity, y = `Results (mean)%`, 
+                               color = Donor_surface_type, linetype = Donor_surface_type)) +
+  facet_grid(~Donor_surface_type)+
+  geom_point(aes(shape = Donor_surface_type)) +  # 绘制点
+  geom_smooth(aes(group = Donor_surface_type), method = "lm", se = FALSE) +  # 添加平滑曲线
+  # scale_color_gradient(low = "blue", high = "red") +  # 颜色浓度表示温度，从蓝色（低温）到红色（高温）
+  # scale_discrete_manual(values = ) +
+  labs(color = "Temperature", shape = "Donor Surface Type", linetype = "Donor Surface Type") +  # 图例标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "right")  # 图例放在右侧
+
+# 显示图表
+print(p)
+
+```
+
+```{r Recipient surface TE&environmental conditions}
+filtered_data <- contact_exp %>%
+  filter(Recipient_surface_type != 'hand' & `Results (mean)%` != '-')
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制折线图
+p <- ggplot(filtered_data, aes(x = Absolute_humidity, y = `Results (mean)%`, 
+                               color = Temperature, linetype = Recipient_surface_type)) +
+  geom_point(aes(shape = Recipient_surface_type)) +  # 绘制点
+  geom_smooth(aes(group = Recipient_surface_type), method = "loess", se = FALSE) +  # 添加平滑曲线
+  scale_color_gradient(low = "blue", high = "red") +  # 颜色浓度表示温度，从蓝色（低温）到红色（高温）
+  labs(color = "Temperature", shape = "Recipient Surface Type", linetype = "Recipient Surface Type") +  # 图例标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "right")  # 图例放在右侧
+
+# 显示图表
+print(p)
+
+```
+
+
+```{r boxplot of Recipient Surface Type and TE }
+filtered_data <- contact_exp %>%
+  filter(Recipient_surface_type != 'hand' & `Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制箱线图
+p <- ggplot(filtered_data, aes(x = Recipient_surface_type, y = `Results (mean)%`, fill = Recipient_surface_type)) +
+  geom_boxplot() +  # 绘制箱线图
+  scale_fill_brewer(palette = "Set3") +  # 使用调色板为不同表面类型着色
+  labs(x = "Recipient Surface Type", y = "Results (mean)%", fill = "Surface Type") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "none")  # 隐藏图例
+
+# 显示图表
+print(p)
+```
+
+```{r boxplot of organism Type and TE }
+filtered_data <- contact_exp %>%
+ filter(Recipient_surface_type != 'hand' & `Results (mean)%` != '-' & Organism_type !='phages')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制箱线图
+p <- ggplot(filtered_data, aes(x = Organism_type, y = `Results (mean)%`, fill = Organism_type)) +
+  geom_boxplot() +  # 绘制箱线图
+  scale_fill_brewer(palette = "Set3") +  # 使用调色板为不同表面类型着色
+  labs(x = "Orgnism Type", y = "Results (mean)%", fill = "Orgnism Type") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "none")  # 隐藏图例
+
+# 显示图表
+print(p)
+```
+
+```{r}
+filtered_data <- contact_exp %>%
+  filter(Recipient_surface_type != 'hand' & `Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制箱线图
+p <- ggplot(filtered_data, aes(x = Recipient_surface_type, y = `Results (mean)%`, fill = Recipient_surface_type)) +
+  geom_boxplot() +  # 绘制箱线图
+  scale_fill_brewer(palette = "Set3") +  # 使用调色板为不同表面类型着色
+  labs(x = "Recipient Surface Type", y = "Results (mean)%", fill = "Surface Type") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  theme(legend.position = "none")  # 隐藏图例
+
+# 显示图表
+print(p)
+```
+
+#DAG graph is from left to right side
+dag {
+bb="-4.377,-5.753,3.323,5.979"
+"contact characters" [pos="-1.985,-3.708"]
+"environmental conditions" [pos="-3.736,-2.367"]
+"recovery method" [pos="0.437,1.912"]
+"skin type" [pos="-3.669,0.572"]
+"surface type" [pos="-3.715,-0.779"]
+"transfer direction" [pos="0.011,-4.835"]
+TE [outcome,pos="2.661,0.104"]
+organism [exposure,pos="-3.687,1.681"]
+suspension [pos="-1.102,3.778"]
+"contact characters" -> TE
+"environmental conditions" -> TE
+"recovery method" -> TE
+"skin type" -> "contact characters"
+"skin type" -> "recovery method"
+"skin type" -> TE
+"surface type" -> "contact characters"
+"surface type" -> "recovery method"
+"surface type" -> TE
+"transfer direction" -> TE
+organism -> "recovery method"
+organism -> suspension
+suspension -> "recovery method"
+}
+
+
+## results distribution
+```{r distribution}
+
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-')
+
+# 将 `Results (mean)%` 列转换为数值型
+filtered_data$`Results (mean)%` <- as.numeric(as.character(filtered_data$`Results (mean)%`))
+
+# 绘制直方图
+p <- ggplot(filtered_data, aes(x = `Results (mean)%`)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", color = "black", alpha = 0.7) +  # 设置直方图参数
+  labs(x = "Results (mean)%", y = "Frequency") +  # 图例和标签
+  theme_minimal()  # 使用简约主题
+
+# 显示图表
+print(p)
+
+
+```
+
+```{r wrap by formula}
+# 假设分类变量为 Donor_surface_type
+p <- ggplot(filtered_data, aes(x = `Results (mean)%`)) +
+  geom_histogram(binwidth = 5, fill = "blue", color = "black", alpha = 0.7) +  # 设置直方图参数
+  labs(x = "Results (mean)%", y = "Frequency") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  facet_wrap(~ Formula) 
+
+# 显示图表
+print(p)
+
+```
+
+
+
+
+
+```{r wrap by donor surface}
+# 假设分类变量为 Donor_surface_type
+p <- ggplot(filtered_data, aes(x = `Results (mean)%`)) +
+  geom_histogram(binwidth = 5, fill = "blue", color = "black", alpha = 0.7) +  # 设置直方图参数
+  labs(x = "Results (mean)%", y = "Frequency") +  # 图例和标签
+  theme_minimal() +  # 使用简约主题
+  facet_wrap(~ Donor_surface_type) 
+
+# 显示图表
+print(p)
+
+```
+
+```{r fit beta}
+library(fitdistrplus)
+# 过滤掉 Results (mean)% 为 '-' 的行
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# 确保数据在 [0, 1] 范围内
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1)
+
+
+# 拟合贝塔分布
+fit <- fitdist(filtered_data$`Results (mean)%`, "beta")
+
+# 绘制直方图和拟合的贝塔分布曲线
+p <- ggplot(filtered_data, aes(x = `Results (mean)%`)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  stat_function(fun = function(x) dbeta(x, fit$estimate["shape1"], fit$estimate["shape2"]), 
+                color = "red", size = 1) +
+  labs(x = "Results (mean)%", y = "Density") +
+  theme_minimal()
+
+# 显示图表
+print(p)
+summary(fit) 
+```
+```{r fit gamma}
+# 拟合伽玛分布
+fit_gamma <- fitdist(filtered_data$`Results (mean)%`, "gamma")
+
+# 绘制直方图和拟合的伽玛分布曲线
+p <- ggplot(filtered_data, aes(x = `Results (mean)%`)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  stat_function(fun = function(x) dgamma(x, shape = fit_gamma$estimate["shape"], rate = fit_gamma$estimate["rate"]), 
+                color = "red", size = 1) +
+  labs(x = "Results (mean)%", y = "Density") +
+  theme_minimal()
+
+# 显示图表
+print(p)
+
+summary(fit_gamma)
+
+# Kolmogorov-Smirnov 检验
+ks_test <- ks.test(filtered_data$`Results (mean)%`, "pgamma", shape = fit_gamma$estimate["shape"], rate = fit_gamma$estimate["rate"])
+print(ks_test)
+
+```
+```{r colnames}
+print(colnames(contact_exp))
+```
+```{r regression model}
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# 进一步过滤掉非正值，因为伽玛分布需要正值
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0)
+
+# 确保 Donor_porosity 和 Recipient_porosity 是因子型
+filtered_data <- filtered_data %>%
+  mutate(Donor_porosity = as.factor(Donor_porosity),
+         Recipient_porosity = as.factor(Recipient_porosity))
+
+# 包括交互作用的回归模型
+model_interaction <- lm(`Results (mean)%` ~ Donor_porosity * Recipient_porosity + Absolute_humidity+ Donor_surface_type+Organism_type, data = filtered_data)
+
+# 查看回归模型的结果
+summary(model_interaction)
+```
+
+```{r compare beta & gamma}
+# 计算对数似然
+loglik_beta <- logLik(fit)
+loglik_gamma <- logLik(fit_gamma)
+
+# 计算参数数量
+k_beta <- length(fit$estimate)
+k_gamma <- length(fit_gamma$estimate)
+
+# 计算样本量
+n <- length(filtered_data$`Results (mean)%`)
+
+# 手动计算 AIC 和 BIC
+aic_beta <- -2 * loglik_beta + 2 * k_beta
+aic_gamma <- -2 * loglik_gamma + 2 * k_gamma
+bic_beta <- -2 * loglik_beta + log(n) * k_beta
+bic_gamma <- -2 * loglik_gamma + log(n) * k_gamma
+
+# 创建比较表格
+comparison_df <- data.frame(
+  Distribution = c("Beta", "Gamma"),
+  LogLikelihood = c(loglik_beta, loglik_gamma),
+  AIC = c(aic_beta, aic_gamma),
+  BIC = c(bic_beta, bic_gamma)
+)
+
+# 打印比较表格
+print(comparison_df)
+
+# 创建 Q-Q 图
+par(mfrow = c(1, 2))
+qqcomp(fit, main = "Beta Q-Q Plot")
+qqcomp(fit_gamma, main = "Gamma Q-Q Plot")
+
+# 创建 P-P 图
+par(mfrow = c(1, 2))
+ppcomp(fit, main = "Beta P-P Plot")
+ppcomp(fit_gamma, main = "Gamma P-P Plot")
+
+# Kolmogorov-Smirnov 检验（Beta 分布）
+ks_test_beta <- ks.test(filtered_data$`Results (mean)%`, "pbeta", shape1 = fit$estimate["shape1"], shape2 = fit$estimate["shape2"])
+print(ks_test_beta)
+
+# Kolmogorov-Smirnov 检验（Gamma 分布）
+ks_test_gamma <- ks.test(filtered_data$`Results (mean)%`, "pgamma", shape = fit_gamma$estimate["shape"], rate = fit_gamma$estimate["rate"])
+print(ks_test_gamma)
+
+# 比较两个分布的拟合
+gof_beta <- gofstat(fit)
+gof_gamma <- gofstat(fit_gamma)
+
+# 打印拟合优度统计量
+print(data.frame(
+  Statistic = c("Kolmogorov-Smirnov", "Cramer-von Mises", "Anderson-Darling"),
+  Beta = c(gof_beta$ks, gof_beta$cvm, gof_beta$ad),
+  Gamma = c(gof_gamma$ks, gof_gamma$cvm, gof_gamma$ad)
+))
+```
+
+```{r}
+# 首先，确保安装并加载必要的包
+if (!require(betareg)) install.packages("betareg")
+library(betareg)
+
+# 数据预处理
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# Beta 回归要求因变量严格在 (0,1) 区间内，所以我们需要进行一些调整
+epsilon <- 0.0001  # 一个很小的数
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1) %>%
+  mutate(`Results (mean)%` = pmin(pmax(`Results (mean)%`, epsilon), 1 - epsilon))
+
+# 确保分类变量是因子型
+filtered_data <- filtered_data %>%
+  mutate(Donor_porosity = as.factor(Donor_porosity),
+         Recipient_porosity = as.factor(Recipient_porosity),
+         Donor_surface_type = as.factor(Donor_surface_type),
+         Orgnism_type = as.factor(Orgnism_type))
+
+# 使用 betareg 函数拟合 Beta 回归模型
+model_beta <- betareg(`Results (mean)%` ~ Donor_porosity * Recipient_porosity + 
+                      Absolute_humidity + Donor_surface_type + Orgnism_type, 
+                      data = filtered_data)
+
+# 查看回归模型的结果
+summary(model_beta)
+
+# 如果需要，可以进行模型诊断
+plot(model_beta)
+
+# 可选：如果想要比较不同模型，可以使用 AIC
+AIC(model_beta)
+
+```
+
+```{r beta LM}
+# 加载必要的库
+library(dplyr)
+library(betareg)
+
+# 数据预处理
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# Beta 回归要求因变量严格在 (0,1) 区间内
+epsilon <- 0.0001
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1) %>%
+  mutate(`Results (mean)%` = pmin(pmax(`Results (mean)%`, epsilon), 1 - epsilon))
+
+# 确保分类变量是因子型
+filtered_data <- filtered_data %>%
+  mutate(across(c(Donor_porosity,Donor_surface_type, Organism_type), as.factor))
+
+# 检查数据
+summary(filtered_data)
+
+
+# 如果所有 Beta 回归模型都失败，可以尝试使用标准的线性回归，但要注意解释的局限性
+
+  model_lm <- lm(`Results (mean)%` ~ Donor_porosity + 
+                 Absolute_humidity + Donor_surface_type + Organism_type, 
+                 data = filtered_data)
+  summary(model_lm)
+
+```
+
+```{r beta forest plot}
+# 加载必要的库
+library(broom)
+
+# 提取模型系数和置信区间
+coef_df <- tidy(model_lm, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = gsub("Absolute_humidity_scaled", "Absolute humidity", term))
+
+# 创建森林图
+forest_plot <- ggplot(coef_df, aes(x = estimate, y = term)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank()
+  ) +
+  labs(
+    title = "Forest Plot of Variable Effects",
+    subtitle = "Estimates with 95% Confidence Intervals",
+    x = "Coefficient Estimate"
+  ) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+# 显示图形
+print(forest_plot)
+
+# 可选：保存图形
+ggsave("forest_plot.png", forest_plot, width = 10, height = 8, dpi = 300)
+
+# 打印系数表格，包括 p 值
+print(coef_df %>% select(term, estimate, conf.low, conf.high, p.value))
+```
+
+```{r}
+# 加载必要的包
+library(dplyr)
+
+# 数据预处理 (和您之前的代码相同)
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# Beta 回归要求因变量严格在 (0,1) 区间内
+epsilon <- 0.0001
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1) %>%
+  mutate(`Results (mean)%` = pmin(pmax(`Results (mean)%`, epsilon), 1 - epsilon))
+
+# 确保分类变量是因子型
+filtered_data <- filtered_data %>%
+  mutate(across(c(Donor_porosity, Donor_surface_type, Orgnism_type), as.factor))
+
+# 检查数据
+summary(filtered_data)
+
+# 使用 brms 拟合 Beta 回归模型
+# 这里我们使用 'family = Beta()' 来指定 Beta 分布
+model_beta <- brm(
+  formula = `Results (mean)%` ~ Donor_porosity + Absolute_humidity + Donor_surface_type + Orgnism_type,
+  data = filtered_data,
+  family = Beta(),
+  chains = 4,          # 指定并行的 MCMC 链数
+  cores = parallel::detectCores(),  # 使用可用的核心数
+  iter = 2000          # 迭代次数
+)
+
+# 输出模型结果
+summary(model_beta)
+
+# 检查拟合效果和诊断
+plot(model_beta)
+
+```
+```{r}
+# 数据预处理
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# Beta 回归要求因变量严格在 (0,1) 区间内
+epsilon <- 0.0001
+filtered_data <- filtered_data %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1) %>%
+  mutate(`Results (mean)%` = pmin(pmax(`Results (mean)%`, epsilon), 1 - epsilon))
+
+# 确保分类变量是因子型
+filtered_data <- filtered_data %>%
+  mutate(across(c(Donor_porosity, Donor_surface_type, Orgnism_type), as.factor))
+
+# 检查数据
+summary(filtered_data)
+
+# 拟合 Beta 回归模型，检查公式是否正确
+model_brm <- brm(`Results (mean)%` ~ Donor_porosity + 
+                              Absolute_humidity + 
+                              Donor_surface_type + 
+                              Orgnism_type, 
+                 data = filtered_data,
+                 family = Beta(),
+                 prior = set_prior("normal(0, 5)", class = "b"),
+                 iter = 4000,
+                 chains = 4,
+                 cores = 4)
+
+
+# 查看模型摘要
+summary(model_brm)
+
+```
+
+```{r fit in beta regression model}
+# 加载必要的包
+library(dplyr)
+library(brms)
+
+# 数据预处理
+filtered_data <- contact_exp %>%
+  filter(`Results (mean)%` != '-') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)))
+
+# 重命名变量，避免使用特殊字符
+filtered_data <- filtered_data %>%
+  rename(Results_mean = `Results (mean)%`)
+
+# Beta 回归要求因变量严格在 (0,1) 区间内
+epsilon <- 0.0001
+filtered_data <- filtered_data %>%
+  filter(Results_mean > 0 & Results_mean < 1) %>%
+  mutate(Results_mean = pmin(pmax(Results_mean, epsilon), 1 - epsilon))
+
+# 确保分类变量是因子型
+filtered_data <- filtered_data %>%
+  mutate(across(c(Donor_porosity, Donor_surface_type, Organism_type), as.factor))
+
+# 检查数据
+summary(filtered_data)
+
+# 拟合 Beta 回归模型，使用重命名后的变量名
+model_brm <- brm(Results_mean ~ Donor_porosity + 
+                  Absolute_humidity + 
+                  Donor_surface_type + 
+                  Organism_type, 
+                 data = filtered_data,
+                 family = Beta(),
+                 prior = set_prior("normal(0, 5)", class = "b"),
+                 iter = 4000,
+                 chains = 4,
+                 cores = 4)
+
+# 查看模型摘要
+summary(model_brm)
+
+```
+
+```{r Beta Regression Forest Plot}
+# 加载必要的包
+library(brms)
+library(ggplot2)
+library(dplyr)
+
+# 提取固定效应的回归系数及置信区间
+summary_model <- fixef(model_brm, probs = c(0.025, 0.975))
+
+# 将结果转化为数据框格式
+coef_df <- as.data.frame(summary_model) %>%
+  mutate(term = rownames(summary_model)) %>%
+  rename(estimate = Estimate, conf.low = Q2.5, conf.high = Q97.5)
+
+# 创建 Beta Regression Forest Plot
+ggplot(coef_df, aes(x = term, y = estimate)) +
+  geom_point(size = 3, color = "blue") +  # 回归系数点
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +  # 置信区间
+  coord_flip() +  # 翻转坐标轴，横向显示
+  labs(title = "Beta Regression Forest Plot", 
+       x = "Variables", 
+       y = "Coefficient Estimate") +
+  theme_minimal()  # 使用简约的主题
+
+
+```
+
+```{r plot for formular 1}
+library(fitdistrplus)
+# 过滤掉 Results (mean)% 为 '-' 的行
+filtered_data_1 <- contact_exp %>%
+  filter(`Formula` == '1')  %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`))/100)
+
+# 确保数据在 [0, 1] 范围内
+filtered_data_1 <- filtered_data_1 %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1)
+
+
+# 拟合贝塔分布
+fit <- fitdist(filtered_data_1$`Results (mean)%`, "beta")
+
+# 绘制直方图和拟合的贝塔分布曲线
+p <- ggplot(filtered_data_1, aes(x = `Results (mean)%`)) +
+  geom_histogram(aes(y = ..density..),  binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  stat_function(fun = function(x) dbeta(x, fit$estimate["shape1"], fit$estimate["shape2"]), 
+                color = "red", size = 1) +
+  labs(x = "Results (mean)%", y = "Density") +
+  theme_minimal()
+
+
+# 显示图表
+print(p)
+summary(fit) 
+summary(filtered_data_1)
+```
+```{r}
+
+# 安装 betareg 包
+install.packages("betareg")
+
+# 加载 betareg 包
+library(betareg)
+
+# 构建 Beta 回归模型
+# 假设用到解释变量 `Variable1` 和 `Variable2`
+beta_model <- betareg(`Results (mean)%` ~ Variable1 + Variable2, data = filtered_data_1)
+
+# 查看模型摘要
+summary(beta_model)
+
+# 绘制拟合值与残差图
+plot(beta_model, which = 1:4)
+
+```
+```{r}
+# 加载所需库
+library(fitdistrplus)
+library(ggplot2)
+library(dplyr)
+
+# 过滤掉 `Results (mean)%` 为 '-' 的行并转换 `Results (mean)%` 列为数值
+filtered_data_1 <- contact_exp %>%
+  filter(`Formula` == '1') %>%
+  mutate(`Results (mean)%` = as.numeric(as.character(`Results (mean)%`)) / 100)
+
+# 确保数据在 [0, 1] 范围内
+filtered_data_1 <- filtered_data_1 %>%
+  filter(`Results (mean)%` > 0 & `Results (mean)%` < 1)
+
+# 拟合 Beta 分布
+fit_beta <- fitdist(filtered_data_1$`Results (mean)%`, "beta")
+
+# 拟合 Gamma 分布
+fit_gamma <- fitdist(filtered_data_1$`Results (mean)%`, "gamma")
+
+# 绘制直方图并添加 Beta 和 Gamma 分布的拟合曲线
+p <- ggplot(filtered_data_1, aes(x = `Results (mean)%`)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  stat_function(fun = function(x) dbeta(x, fit_beta$estimate["shape1"], fit_beta$estimate["shape2"]),
+                color = "red", size = 1, linetype = "dashed") +
+  stat_function(fun = function(x) dgamma(x, shape = fit_gamma$estimate["shape"], rate = fit_gamma$estimate["rate"]),
+                color = "green", size = 1, linetype = "solid") +
+  labs(x = "Results (mean)%", y = "Density", 
+       title = "Beta (Red) and Gamma (Green) Fit for Results (mean)%") +
+  theme_minimal()
+
+# 显示拟合图
+print(p)
+
+# 输出 Beta 和 Gamma 拟合的摘要
+summary(fit_beta)
+summary(fit_gamma)
+
+# 计算对数似然、AIC 和 BIC
+loglik_beta <- logLik(fit_beta)
+loglik_gamma <- logLik(fit_gamma)
+
+k_beta <- length(fit_beta$estimate)
+k_gamma <- length(fit_gamma$estimate)
+n <- length(filtered_data_1$`Results (mean)%`)
+
+# AIC 和 BIC 计算
+aic_beta <- -2 * loglik_beta + 2 * k_beta
+aic_gamma <- -2 * loglik_gamma + 2 * k_gamma
+bic_beta <- -2 * loglik_beta + log(n) * k_beta
+bic_gamma <- -2 * loglik_gamma + log(n) * k_gamma
+
+# 创建比较表格
+comparison_df <- data.frame(
+  Distribution = c("Beta", "Gamma"),
+  LogLikelihood = c(loglik_beta, loglik_gamma),
+  AIC = c(aic_beta, aic_gamma),
+  BIC = c(bic_beta, bic_gamma)
+)
+
+# 显示比较结果
+print(comparison_df)
+
+# 绘制 Q-Q 和 P-P 图来对比 Beta 和 Gamma 分布的拟合效果
+par(mfrow = c(2, 2))
+qqcomp(fit_beta, main = "Beta Q-Q Plot")
+qqcomp(fit_gamma, main = "Gamma Q-Q Plot")
+ppcomp(fit_beta, main = "Beta P-P Plot")
+ppcomp(fit_gamma, main = "Gamma P-P Plot")
+
+```
+
+
+https://tysonbarrett.com/Rstats/chapter-5-generalized-linear-models.html    beta regression
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
