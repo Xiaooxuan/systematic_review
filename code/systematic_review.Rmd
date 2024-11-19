@@ -3,6 +3,7 @@ title: "Systematic Review"
 output: html_document
 date: "2024-06-26"
 ---
+## data input and install packages
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -19,31 +20,16 @@ library(gridExtra)
 
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r Read in data and clean}
-```
-
-
 ```{r Read in data and clean}
 contact_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "contact experiments")
-contact_exp
 
 other_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "other kinds of experiments")
-other_exp
 
 all_exp<-read_excel(path = "../data/reference list.xlsx",sheet = "all")
-all_exp
+
 ```
 
-## Section 3.1 Orgnism/Contaminant types
-
-
-```{r give an id to each paper(all experiments), echo=FALSE}
+```{r give an id to each paper, echo=FALSE}
 all_exp <- all_exp %>%
   group_by(Title) %>%
   mutate(id = cur_group_id()) %>%
@@ -57,43 +43,27 @@ all_exp <- all_exp %>%
   dplyr::mutate(id = dplyr::cur_group_id()) %>%
   dplyr::ungroup() %>%
   dplyr::select(id, Title, dplyr::everything())
-all_exp
+
 
 contact_exp <- contact_exp %>%
   dplyr::group_by(Title) %>%
   dplyr::mutate(id = dplyr::cur_group_id()) %>%
   dplyr::ungroup() %>%
   dplyr::select(id, Title, dplyr::everything())
-contact_exp
+
+
+other_exp <- other_exp %>%
+  dplyr::group_by(Title) %>%
+  dplyr::mutate(id = dplyr::cur_group_id()) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(id, Title, dplyr::everything())
 
 
 ```
 
-```{r}
-library(networkD3)
-library(dplyr)
-organism_data <- all_exp%>%
-  distinct(Organism_type, Organism, id) %>%
-  count(Organism_type, Organism, name = "frequency")
 
-nodes <- data.frame(name = c(unique(organism_data$Organism_type), unique(organism_data$Organism)))
+## Section 3.1 Orgnism/Contaminant types and publish year
 
-# 创建链接数据框
-links <- organism_data %>%
-  mutate(source = match(Organism_type, nodes$name) - 1,
-         target = match(Organism, nodes$name) - 1,
-         value = frequency) %>%
-  select(source, target, value)
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "source", Target = "target",
-                        Value = "value", NodeID = "name",
-                        units = "Frequency", fontSize = 12, nodeWidth = 30)
-
-# 显示桑基图
-sankey
-```
 
 ```{r plot Organism/Contaminant types}
 library(networkD3)
@@ -120,153 +90,17 @@ sankey <- sankeyNetwork(Links = links, Nodes = nodes,
 
 # 显示桑基图
 sankey
-
-```
-```{r}
-library(dplyr)
-library(networkD3)
-
-# 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
-suspending_data <- all_exp %>%
-  distinct(Suspending_medium, Suspending, Organism_type, id) %>%
-  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
-
-# 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
-nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
-nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
-nodes_organism <- data.frame(name = unique(suspending_data$Organism_type), type = "organism")
-
-# 合并节点数据框
-nodes <- bind_rows(nodes_medium, nodes_suspending, nodes_organism)
-
-# 创建第一阶段链接（Suspending_medium -> Suspending）
-links_1 <- suspending_data %>%
-  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
-         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
-         value = frequency) %>%
-  dplyr::select(source, target, value)
-
-# 创建第二阶段链接（Suspending -> Organism_type）
-links_2 <- suspending_data %>%
-  mutate(source = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
-         target = match(Organism_type, nodes$name[nodes$type == "organism"]) - 1 + nrow(nodes_medium) + nrow(nodes_suspending),
-         value = frequency) %>%
-  dplyr::select(source, target, value)
-
-# 合并两个链接数据框
-links <- bind_rows(links_1, links_2)
-
-# 创建颜色比例尺，为不同的类型分配不同的颜色
-colorScale <- 'd3.scaleOrdinal()
-                 .domain(["medium", "suspending", "organism"])
-                 .range(["#1f77b4", "#ff7f0e", "#2ca02c"])'
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "source", Target = "target",
-                        Value = "value", NodeID = "name",
-                        units = "Frequency", fontSize = 12, nodeWidth = 30,
-                        colourScale = colorScale, iterations = 0)
-
-# 显示桑基图
-sankey
+num_organisms <- n_distinct(all_exp$Organism)
+num_organisms
+# 查看每种 Organism 类型的数量
+organism_counts <- all_exp %>%
+  count(Organism)
+organism_counts
 
 ```
 
-```{r set up a color palette to make the color match}
-# 加载必要库
-# 加载必要的库
-library(RColorBrewer)
-
-# 使用 colorRampPalette 生成足够的颜色
-color_palette <- colorRampPalette(brewer.pal(12, "Set3"))(length(unique_organisms))
-
-# 创建一个颜色映射表
-color_mapping <- setNames(color_palette, unique_organisms)
-
-```
-
-```{r make color match}
-library(networkD3)
-
-# 使用 d3.js 的 colourScale 手动为节点分配颜色
-colorJS <- paste0("d3.scaleOrdinal().domain([",
-                  paste0("\"", unique_organisms, "\"", collapse = ","),
-                  "]).range([",
-                  paste0("\"", color_mapping, "\"", collapse = ","),
-                  "]);")
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "source", Target = "target",
-                        Value = "value", NodeID = "name",
-                        units = "Frequency", fontSize = 12, nodeWidth = 30,
-                        colourScale = JS(colorJS))  # 使用自定义颜色映射
-
-# 显示桑基图
-sankey
-
-
-```
-
-# figure describe
-The figure presents a Sankey chart depicting the types of microorganisms or contaminants selected in the reviewed articles.  The left side of the chart enumerates the categories of substances studied, including biological fluids, Gram-negative bacteria, Gram-positive bacteria, phages, plant extracts, and viruses.  Each category is linked to specific organisms or contaminants on the right.  These specific names include artificial saliva, human saliva, various bacteria (such as Pseudomonas aeruginosa, Staphylococcus aureus, etc.), bacteriophage MS2, plant extract beetroot juice, and various viruses (such as SARS-CoV-2, human norovirus, etc.).  Among these, viruses constituted the largest proportion (53.1%) and bacteria (40.6%), with 10 Gram-negative bacteria and 8 Gram-positive bacteria.  Staphylococcus aureus was the most frequently mentioned organism (15.6%), followed by E. coli and norovirus (approximately 12.5% each).
-
-## Section 3.2 Publish year
 
 ```{r publish year}
-yearly_organism_data <- all_exp %>%
-  distinct(Year, Organism_type, id) %>%
-  count(Year, Organism_type, name = "frequency")
-
-ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
-  geom_bar(stat = "identity") +
-  labs(#title = "Number of Articles Published Each Year by Organism Type",
-       x = "Year",
-       y = "Number of Articles",
-       fill = "Organism Type") +
-  theme_minimal()
-```
-
-```{r change the color to match previous plot}
-library(ggplot2)
-library(RColorBrewer)
-
-yearly_organism_data <- all_exp %>%
-  distinct(Year, Organism_type, id) %>%
-  count(Year, Organism_type, name = "frequency")
-
-# 获取颜色调色板
-color_palette <- brewer.pal(n = length(unique(yearly_organism_data$Organism_type)), "Set3")
-
-# 创建柱状图，使用相同的调色板
-ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = color_palette) +
-  labs(title = "Number of Articles Published Each Year by Organism Type",
-       x = "Year",
-       y = "Number of Articles",
-       fill = "Organism Type") +
-  theme_minimal()
-
-```
-
-```{r}
-# Step 1: Calculate the number of distinct articles per year
-yearly_article_data <- all_exp %>%
-  distinct(Year, Title) %>%  # Ensure each article (Title) is counted only once per Year
-  count(Year, name = "Number_of_Articles")  # Count the number of articles per year
-
-# Step 2: Plot the number of articles by year
-ggplot(data = yearly_article_data, aes(x = Year, y = Number_of_Articles)) +
-  geom_bar(stat = "identity", fill = "skyblue") +  # Simple bar plot with skyblue color
-  labs(title = "Number of Articles Published Each Year",
-       x = "Year",
-       y = "Number of Articles") +
-  theme_minimal()
-
-```
-```{r}
 # Step 1: Summarise each article by combining its organism types
 article_organism_summary <- all_exp %>%
   group_by(Year, Title) %>%
@@ -302,52 +136,9 @@ ggplot(data = yearly_organism_data, aes(x = Year, y = Proportional_Articles, fil
   )
 ```
 
+## Section 3.2  Experimental design
+# 3.2.1 Suspension medium
 
-```{r another color palette}
-library(ggplot2)
-
-# 使用 color_mapping 中的颜色为 Organism_type 着色
-ggplot(data = yearly_organism_data, aes(x = Year, y = frequency, fill = Organism_type)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = color_mapping) +  # 使用相同的颜色映射
-  labs(title = "Number of Articles Published Each Year by Organism Type",
-       x = "Year",
-       y = "Number of Articles",
-       fill = "Organism Type") +
-  theme_minimal()
-
-```
-
-
-# figure describe
-This graph shows the number of articles published per year by type of organism. As can be seen from the chart, the focus of the study varied from year to year. For example, research in the early 1990s focused on viruses. Around 2000-2005, research directions began to diversify to include Gram-negative bacteria, Gram-positive bacteria, and viruses. By around 2013, the scope of the research was further expanded with the addition of mixtures and phages. Around 2021, the number of studies reached a peak, covering almost all types of organisms, especially viruses and Gram-negative bacteria.
-
-## Section 3.3 Suspending medium
-
-```{r bar chart Suspending_medium ~ Organism_type}
-suspending_data <- all_exp %>%
-  distinct(Suspending_medium, Organism_type, id) %>%
-  count(Suspending_medium, Organism_type, name = "frequency")
-
-# 创建堆叠条形图
-ggplot(data = suspending_data, aes(x = Suspending_medium, y = frequency, fill = Organism_type)) +
-  geom_bar(stat = "identity", position = "stack") +
-  labs(title = "Frequency of Suspending Medium by Organism Type",
-       x = "Suspending Medium",
-       y = "Frequency",
-       fill = "Organism Type") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-```{r frequency of suspension}
-ggplot(all_exp, aes(x = Suspending_medium)) +
-  geom_bar() +
-  xlab("Suspending Medium") +
-  ylab("Frequency") +
-  ggtitle("Frequency of Different Suspending Media")+
-   theme_minimal()
-
-```
 
 ```{r sankey Suspending_medium ~ Orgnism_type}
 library(dplyr)
@@ -379,40 +170,6 @@ sankey <- sankeyNetwork(Links = links, Nodes = nodes,
 sankey
 
 ```
-
-
-```{r sankey Suspending_medium ~ Organism_type}
-library(dplyr)
-library(networkD3)
-
-# 确保每个Suspending Medium、Orgnism_type和Suspending中每个相同的id只记录一次，并统计频率
-suspending_data <- all_exp %>%
-  distinct(Suspending_medium, Organism_type, Suspending, id) %>%
-  count(Suspending_medium, Organism_type, Suspending, name = "frequency")
-
-# 创建节点数据框，包含所有唯一的Suspending_medium、Orgnism_type和Suspending
-nodes <- data.frame(name = unique(c(suspending_data$Suspending_medium, 
-                                    suspending_data$Organism_type, 
-                                    suspending_data$Suspending)))
-
-# 创建第一阶段（Suspending_medium -> Orgnism_type）和第二阶段（Orgnism_type -> Suspending）的链接数据框
-links_1 <- suspending_data %>%
-  mutate(source = match(Suspending_medium, nodes$name) - 1,
-         target = match(Suspending, nodes$name) - 1,
-         value = frequency) %>%
-  dplyr::select(source, target, value)
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "source", Target = "target",
-                        Value = "value", NodeID = "name",
-                        units = "Frequency", fontSize = 12, nodeWidth = 30)
-
-# 显示桑基图
-sankey
-
-```
-
 
 ```{r suspension type link to each spercific suspension medium}
 library(dplyr)
@@ -448,66 +205,15 @@ sankey
 
 ```
 
-```{r removed those untarget lines and changed the color all the same}
+```{r Suspending_medium、Suspending & Organism_type}
 library(dplyr)
 library(networkD3)
 
 # 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
 suspending_data <- all_exp %>%
   distinct(Suspending_medium, Suspending, Organism_type, id) %>%
-  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
-
-# 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
-nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
-nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
-nodes_organism <- data.frame(name = unique(suspending_data$Organism_type), type = "organism")
-
-# 合并节点数据框
-nodes <- bind_rows(nodes_medium, nodes_suspending, nodes_organism)
-
-# 创建第一阶段链接（Suspending_medium -> Suspending）
-links_1 <- suspending_data %>%
-  mutate(source = match(Suspending_medium, nodes$name[nodes$type == "medium"]) - 1,
-         target = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
-         value = frequency) %>%
-  dplyr::select(source, target, value)
-
-# 创建第二阶段链接（Suspending -> Organism_type）
-links_2 <- suspending_data %>%
-  mutate(source = match(Suspending, nodes$name[nodes$type == "suspending"]) - 1 + nrow(nodes_medium),
-         target = match(Organism_type, nodes$name[nodes$type == "organism"]) - 1 + nrow(nodes_medium) + nrow(nodes_suspending),
-         value = frequency) %>%
-  dplyr::select(source, target, value)
-
-# 合并两个链接数据框
-links <- bind_rows(links_1, links_2)
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "source", Target = "target",
-                        Value = "value", NodeID = "name",
-                        units = "Frequency", fontSize = 12, nodeWidth = 30,
-                        # 自定义节点的位置
-                        iterations = 0) 
-
-# 通过 JavaScript 自定义节点的位置和显示标签
-sankey$x$options$nodePadding <- 10  # 节点之间的间距
-sankey$x$nodes$group <- as.factor(nodes$type)  # 设置不同节点组的分配
-
-# 显示桑基图
-sankey
-
-```
-
-```{r change color back to original}
-library(dplyr)
-library(networkD3)
-
-# 确保每个 Suspending_medium、Suspending 和 Organism_type 的唯一组合，并统计频率
-suspending_data <- all_exp %>%
-  distinct(Suspending_medium, Suspending, Organism_type, id) %>%
-  count(Suspending_medium, Suspending, Organism_type, name = "frequency")
-
+  count(Suspending_medium, Suspending, Organism_type, name = "frequency")%>%
+ filter(!is.na(Suspending_medium) & Suspending_medium != "")
 # 创建节点数据框，分别为 Suspending_medium、Suspending 和 Organism_type 创建不同的索引范围
 nodes_medium <- data.frame(name = unique(suspending_data$Suspending_medium), type = "medium")
 nodes_suspending <- data.frame(name = unique(suspending_data$Suspending), type = "suspending")
@@ -541,25 +247,115 @@ sankey <- sankeyNetwork(Links = links, Nodes = nodes,
 sankey
 
 ```
+# 3.2.2 Donor surface/hand contamination method
+
+```{r Group bar chart of contaminate method by id}
 
 
-```{r Suspending_medium Scatter Plot}
-suspending_data <- all_exp %>%
-  distinct(Suspending_medium, Organism_type, id) %>%
-  count(Suspending_medium, Organism_type, name = "frequency")
+# Categorize drying duration into groups
+all_exp <- all_exp %>%
+  mutate(DryingTimeGroup = case_when(
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` == "24h" ~ "24 hours",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` >= 1 & `drying duration` <= 15 ~ "1-15 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 15 & `drying duration` <= 30 ~ "16-30 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 30 & `drying duration` <= 45 ~ "31-45 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 45 & `drying duration` <= 60 ~ "46-60 minutes",
+    TRUE ~ NA_character_  # For non-dry surfaces or missing drying duration
+  ))
 
-# 创建散点图
-ggplot(data = suspending_data, aes(x = Suspending_medium, y = frequency, color = Organism_type)) +
-  geom_point(size = 3, alpha = 0.7) +
-  labs(title = "Frequency of Suspending Medium by Organism Type",
-       x = "Suspending Medium",
-       y = "Frequency",
-       color = "Organism Type") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Summarize data: Group by surface condition and drying time group, then count unique IDs
+summary_data <- all_exp %>%
+  group_by(`Pre-contact_Preparation (wet or dry)`, DryingTimeGroup) %>%
+  summarise(UniqueID_Count = n_distinct(id)) %>%
+  ungroup()
+
+# Create grouped bar chart with y-axis as unique ID count
+ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueID_Count, fill = DryingTimeGroup)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(#title = "Surface Condition and Drying Time Distribution by Unique IDs", 
+       x = "Surface Condition", y = "Number of Articles", fill = "Drying Time Group") +
+  #theme_minimal()
+theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )
+
 ```
 
+```{r Group bar chart of contaminate method in different color}
+# Update the drying duration to include all surface conditions and unique categories
+all_exp <- all_exp %>%
+  mutate(DryingTimeGroup = case_when(
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` == "24h" ~ "Dry: 24 hours",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` >= 1 & `drying duration` <= 15 ~ "Dry: 1-15 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 15 & `drying duration` <= 30 ~ "Dry: 16-30 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 30 & `drying duration` <= 45 ~ "Dry: 31-45 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 45 & `drying duration` <= 60 ~ "Dry: 46-60 minutes",
+    `Pre-contact_Preparation (wet or dry)` == "Dry" ~ "Dry: until dry", # Handling for dry but missing duration
+    `Pre-contact_Preparation (wet or dry)` == "Frozen" ~ "Frozen",
+    `Pre-contact_Preparation (wet or dry)` == "Wet" ~ "Wet",
+    `Pre-contact_Preparation (wet or dry)` == "Not mentioned" ~ "Not mentioned",
+    TRUE ~ "Other"  # For any unexpected cases
+  )) %>%
+  # Set factor levels to define legend order
+  mutate(DryingTimeGroup = factor(DryingTimeGroup, levels = c(
+    "Dry: 1-15 minutes", "Dry: 16-30 minutes", "Dry: 31-45 minutes", "Dry: 46-60 minutes", 
+    "Dry: 24 hours", "Dry: until dry", "Frozen", "Wet", "Not mentioned", "Other"
+  )))
+
+# Summarize data: Group by surface condition and drying time group, then count unique IDs
+summary_data <- all_exp %>%
+  group_by(`Pre-contact_Preparation (wet or dry)`, DryingTimeGroup) %>%
+  summarise(UniqueID_Count = n_distinct(id)) %>%
+  ungroup()
+
+# Define custom colors for each group
+custom_colors <- c(
+  "Dry: 1-15 minutes" = "#66c2a5",
+  "Dry: 16-30 minutes" = "#fc8d62",
+  "Dry: 31-45 minutes" = "#8da0cb",
+  "Dry: 46-60 minutes" = "#e78ac3",
+  "Dry: 24 hours" = "#a6d854",
+  "Dry: until dry" = "#ffd92f",
+  "Frozen" = "#e5c494",
+  "Wet" = "#b3b3b3",
+  "Not mentioned" = "#1f78b4",
+  "Other" = "#d73027"
+)
+
+# Create grouped bar chart with y-axis as unique ID count
+ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueID_Count, fill = DryingTimeGroup)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = custom_colors) +  # Apply custom colors
+  labs(
+    x = "Surface Condition", 
+    y = "Number of Articles", 
+    fill = "Drying Time Group / Surface Condition"
+  ) +
+  theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line(),          # Ensure axis ticks are visible
+    legend.position = "bottom"            # Place legend at the bottom
+  )
+
+
+```
+
+# 3.2.3 Contact behaviour
+
+
+## Section 3.3 Transfer direction and surface materials
+
+# 3.3.1 Transfer direction: donor and recipient surfaces
+
+# 3.3.2 Materials: fomite surface type, hand type
+
 ## Section 3.4 Environmental conditions
+
 ```{r Environmental conditions Pie Chart}
 environmental_counts <- all_exp %>%
   count(Environmental_conditions)
@@ -979,39 +775,7 @@ ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = Count, 
     axis.ticks = element_line()           # Ensure axis ticks are visible
   )
 ```
-```{r Group bar chart of contaminate method by id}
 
-
-# Categorize drying duration into groups
-all_exp <- all_exp %>%
-  mutate(DryingTimeGroup = case_when(
-    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` >= 1 & `drying duration` <= 15 ~ "1-15 minutes",
-    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 15 & `drying duration` <= 30 ~ "16-30 minutes",
-    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 30 & `drying duration` <= 45 ~ "31-45 minutes",
-    `Pre-contact_Preparation (wet or dry)` == "Dry" & `drying duration` > 45 & `drying duration` <= 60 ~ "46-60 minutes",
-    TRUE ~ NA_character_  # For non-dry surfaces or missing drying duration
-  ))
-
-# Summarize data: Group by surface condition and drying time group, then count unique IDs
-summary_data <- all_exp %>%
-  group_by(`Pre-contact_Preparation (wet or dry)`, DryingTimeGroup) %>%
-  summarise(UniqueID_Count = n_distinct(id)) %>%
-  ungroup()
-
-# Create grouped bar chart with y-axis as unique ID count
-ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueID_Count, fill = DryingTimeGroup)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  labs(#title = "Surface Condition and Drying Time Distribution by Unique IDs", 
-       x = "Surface Condition", y = "Number of Articles", fill = "Drying Time Group") +
-  #theme_minimal()
-theme_minimal() +  # Use minimal theme as a base
-  theme(
-    panel.grid = element_blank(),         # Remove all grid lines
-    axis.line = element_line(),           # Ensure axis lines are visible
-    axis.ticks = element_line()           # Ensure axis ticks are visible
-  )
-
-```
 ```{r}
 contact_exp_filtered_1 <- contact_exp %>%
   filter(
