@@ -347,12 +347,104 @@ ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueI
 
 # 3.2.3 Contact behaviour
 
+```{r contact duration}
+# Ensure 'time' is numeric
+contact_exp$time <- as.numeric(as.character(contact_exp$time))
 
+# Plot histogram by Donor_surface_type
+ggplot(contact_exp, aes(x = time, fill = `Pre-contact_Preparation (wet or dry)`)) + 
+  geom_histogram(binwidth = 1, color = "black", alpha = 0.7, position = "stack") +
+  labs(#title = "Frequency of Time in Contact Experiments by Surface condition", 
+       x = "Time (seconds)", 
+       y = "Frequency", 
+       fill = "Surface condition") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")  # Use a color palett
+```
 ## Section 3.3 Transfer direction and surface materials
 
 # 3.3.1 Transfer direction: donor and recipient surfaces
 
+```{r transfer direction}
+filtered_data <- contact_exp %>%
+  filter(Donor_surface_type != 'NA' & Recipient_surface_type != 'NA')
+
+# 假设你的数据框名为 contact_exp
+# 创建一个节点数据框，为了区分 Donor 和 Recipient，我们在名字上加前缀
+nodes <- data.frame(name = c(paste0("Donor_", unique(filtered_data$Donor_surface_type)),
+                             paste0("Recipient_", unique(filtered_data$Recipient_surface_type))))
+
+# 创建一个链接数据框
+links <- filtered_data %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n()) %>%
+  ungroup() %>%
+  mutate(Donor_surface_type_id = match(paste0("Donor_", Donor_surface_type), nodes$name) - 1,
+         Recipient_surface_type_id = match(paste0("Recipient_", Recipient_surface_type), nodes$name) - 1)
+
+# 创建桑基图
+sankey <- sankeyNetwork(Links = links, Nodes = nodes,
+                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
+                        Value = "value", NodeID = "name",
+                        fontSize = 12, nodeWidth = 30)
+
+# 显示桑基图
+sankey
+
+```
+
 # 3.3.2 Materials: fomite surface type, hand type
+```{r Donor_surface_type}
+filtered_data <- all_exp[all_exp$Donor_surface_type != "hand", ]
+
+# 去掉 Donor_surface_type 为 'hand' 的行
+filtered_data_no_hand <- filtered_data %>%
+  filter(Donor_surface_type != 'Hand')
+
+# 计算每个 Donor_surface_type 的唯一文章数
+article_counts <- filtered_data_no_hand %>%
+  group_by(Donor_surface_type) %>%
+  summarise(ArticleCount = n_distinct(id))
+
+# 绘制按文章数量分组的条形图
+ggplot(article_counts, aes(x = Donor_surface_type, y = ArticleCount
+)) +
+  geom_bar(stat = "identity") +
+  xlab("Donor Surface Type") +
+  ylab("Number of Articles") +
+  ggtitle("Number of Articles by Donor Surface Type (excluding 'hand')") +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1))
+theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )
+
+
+```
+
+```{r Donor_surface_type+porosity}
+# 计算每个 Donor_surface_type 和 Donor_porosity 的唯一文章数
+article_counts <- filtered_data_no_hand %>%
+  group_by(Donor_surface_type, Gloves,Donor_porosity) %>%
+  summarise(ArticleCount = n_distinct(id)) %>%
+  ungroup()
+
+# 绘制按文章数量分组的条形图，颜色根据 Donor_porosity 填充
+ggplot(article_counts, aes(x = Donor_surface_type, y = ArticleCount, fill = Donor_porosity)) +
+  geom_bar(stat = "identity") +
+  xlab("Donor Surface Type") +
+  ylab("Number of Articles") +
+ # ggtitle("Number of Articles by Donor Surface Type (excluding 'hand')") +
+  theme_minimal() +  
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  ) 
+  #scale_fill_brewer(palette = "Set3")  # 使用颜色调色板
+```
 
 ## Section 3.4 Environmental conditions
 
@@ -369,7 +461,7 @@ ggplot(environmental_counts, aes(x = "", y = n, fill = Environmental_conditions)
 ```
 
 ```{r temperature and RH}
-filtered_data <- all_exp %>%
+filtered_data <- contact_exp %>%
   filter(Environmental_conditions %in% c("N", "Y", "Temperature only"))
 
 # 筛选出 Environmental_conditions 为 Y 的行
@@ -379,7 +471,7 @@ y_data <- filtered_data %>%
 # 使用 ggplot2 绘制图形
 ggplot(y_data, aes(x = Relative_humidity, y = Temperature, color= Organism_type)) +
   geom_point() +
-  labs(title = "Temperature vs Relative Humidity",
+  labs(#title = "Temperature vs Relative Humidity",
        x = "Relative Humidity",
        y = "Temperature") +
   theme_minimal()
@@ -473,6 +565,11 @@ ggplot(filtered_data, aes(x = Donor_surface_type)) +
 
 ```
 
+
+
+
+
+
 surface to hand: 16
 hand to surface: 14
 
@@ -520,33 +617,7 @@ sankey
 
 ## 3.6 transfer direction for contact experiments
 
-```{r transfer direction}
-filtered_data <- contact_exp %>%
-  filter(Donor_surface_type != 'NA' & Recipient_surface_type != 'NA')
 
-# 假设你的数据框名为 contact_exp
-# 创建一个节点数据框，为了区分 Donor 和 Recipient，我们在名字上加前缀
-nodes <- data.frame(name = c(paste0("Donor_", unique(filtered_data$Donor_surface_type)),
-                             paste0("Recipient_", unique(filtered_data$Recipient_surface_type))))
-
-# 创建一个链接数据框
-links <- filtered_data %>%
-  group_by(Donor_surface_type, Recipient_surface_type) %>%
-  summarise(value = n()) %>%
-  ungroup() %>%
-  mutate(Donor_surface_type_id = match(paste0("Donor_", Donor_surface_type), nodes$name) - 1,
-         Recipient_surface_type_id = match(paste0("Recipient_", Recipient_surface_type), nodes$name) - 1)
-
-# 创建桑基图
-sankey <- sankeyNetwork(Links = links, Nodes = nodes,
-                        Source = "Donor_surface_type_id", Target = "Recipient_surface_type_id",
-                        Value = "value", NodeID = "name",
-                        fontSize = 12, nodeWidth = 30)
-
-# 显示桑基图
-sankey
-
-```
 
 ```{r}
 library(dplyr)
@@ -658,24 +729,10 @@ print("Recipient_surface_type when Recipient_porosity is N:")
 print(recipient_n)
 ```
 
-```{r contact time distribution }
-ggplot(contact_exp, aes(x = time)) + 
-  geom_histogram(binwidth = 1, fill = "blue", color = "black", alpha = 0.7) +
-  labs(title = "Frequency of Time in Contact Experiments", 
-       x = "Time (seconds)", 
-       y = "Frequency") +
-  theme_minimal()
 
-# 绘制time列的频率分布图，按Donor_surface_type颜色区分
-ggplot(contact_exp, aes(x = time, fill = Donor_surface_type)) + 
-  geom_histogram(binwidth = 1, color = "black", alpha = 0.7, position = "stack") +
-  labs(title = "Frequency of Time in Contact Experiments by Donor Surface Type", 
-       x = "Time (seconds)", 
-       y = "Frequency", 
-       fill = "Donor Surface Type") +
-  theme_minimal() +
-  scale_fill_brewer(palette = "Set3")  # 使用颜色调色板
-```
+
+
+
 
 
 ```{r calculate Absolute_humidity for contact experiments}
