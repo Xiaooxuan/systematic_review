@@ -352,13 +352,19 @@ ggplot(summary_data, aes(x = `Pre-contact_Preparation (wet or dry)`, y = UniqueI
 contact_exp$time <- as.numeric(as.character(contact_exp$time))
 
 # Plot histogram by Donor_surface_type
-ggplot(contact_exp, aes(x = time, fill = `Pre-contact_Preparation (wet or dry)`)) + 
+ggplot(contact_exp, aes(x = time, fill = `Pre-contact_Preparation (Wet or Dry)`)) + 
   geom_histogram(binwidth = 1, color = "black", alpha = 0.7, position = "stack") +
   labs(#title = "Frequency of Time in Contact Experiments by Surface condition", 
        x = "Time (seconds)", 
        y = "Frequency", 
        fill = "Surface condition") +
-  theme_minimal() +
+ # theme_minimal() +
+  theme_minimal() +  # Use minimal theme as a base
+  theme(
+    panel.grid = element_blank(),         # Remove all grid lines
+    axis.line = element_line(),           # Ensure axis lines are visible
+    axis.ticks = element_line()           # Ensure axis ticks are visible
+  )+
   scale_fill_brewer(palette = "Set3")  # Use a color palett
 ```
 ## Section 3.3 Transfer direction and surface materials
@@ -392,6 +398,59 @@ sankey <- sankeyNetwork(Links = links, Nodes = nodes,
 sankey
 
 ```
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(networkD3)
+library(RColorBrewer)
+
+# Create donor and recipient nodes with internal IDs and display labels
+nodes <- data.frame(
+  name_display = c(unique(filtered_data$Donor_surface_type), unique(filtered_data$Recipient_surface_type)), # Labels without prefixes
+  name_internal = c(paste0("Donor_", unique(filtered_data$Donor_surface_type)),
+                    paste0("Recipient_", unique(filtered_data$Recipient_surface_type))) # Unique internal names
+)
+
+# Assign groups to nodes for coloring
+nodes <- nodes %>%
+  mutate(
+    group = ifelse(grepl("^Donor_", name_internal), "Donor", "Recipient")
+  )
+
+# Create links with correct source and target IDs
+links <- filtered_data %>%
+  group_by(Donor_surface_type, Recipient_surface_type) %>%
+  summarise(value = n(), .groups = "drop") %>%
+  mutate(
+    source = match(paste0("Donor_", Donor_surface_type), nodes$name_internal) - 1,
+    target = match(paste0("Recipient_", Recipient_surface_type), nodes$name_internal) - 1
+  )
+
+# Optional: Create a custom color scale for nodes
+color_scale <- 'd3.scaleOrdinal()
+                .domain(["Donor", "Recipient"])
+                .range(["#1f77b4", "#ff7f0e"])'  # Blue for Donor, Orange for Recipient
+
+# Create the Sankey diagram
+sankey <- sankeyNetwork(
+  Links = links,
+  Nodes = nodes,
+  Source = "source",
+  Target = "target",
+  Value = "value",
+  NodeID = "name_display",  # Use labels without prefixes
+  NodeGroup = "group",      # Use groups for node coloring
+  colourScale = color_scale, # Apply custom color scale
+  fontSize = 12,
+  nodeWidth = 30
+)
+
+# Display the Sankey diagram
+sankey
+
+```
+
 
 # 3.3.2 Materials: fomite surface type, hand type
 ```{r Donor_surface_type}
@@ -442,7 +501,8 @@ ggplot(article_counts, aes(x = Donor_surface_type, y = ArticleCount, fill = Dono
     panel.grid = element_blank(),         # Remove all grid lines
     axis.line = element_line(),           # Ensure axis lines are visible
     axis.ticks = element_line()           # Ensure axis ticks are visible
-  ) 
+  ) +
+  labs(fill = "Donor Porosity")  
   #scale_fill_brewer(palette = "Set3")  # 使用颜色调色板
 ```
 
@@ -476,6 +536,32 @@ ggplot(y_data, aes(x = Relative_humidity, y = Temperature, color= Organism_type)
        y = "Temperature") +
   theme_minimal()
 ```
+
+```{r}
+# 筛选出符合条件的数据
+filtered_data <- contact_exp %>%
+  filter(Environmental_conditions %in% c("N", "Y", "Temperature only"))
+
+# 筛选出 Environmental_conditions 为 Y 的行
+y_data <- filtered_data %>%
+  filter(Environmental_conditions == "Y")
+
+# 使用 ggplot2 绘制图形
+ggplot(y_data, aes(x = Relative_humidity * 100, y = Temperature, color = Organism_type)) +
+  geom_point() +
+  labs(
+    x = "Relative Humidity (%)",  # 加入 RH 的单位
+    y = "Temperature (°C)",       # 加入温度的单位
+    color = "Organism type"       # 修改图例标题
+  ) +
+  theme_minimal() +
+  scale_x_continuous(
+    limits = c(0, 100),           # 确保 RH 范围为 0-100
+    expand = c(0, 0)              # 移除多余的边界空白
+  )
+
+```
+
 ```{r calculate Absolute_humidity}
 library(dplyr)
 
